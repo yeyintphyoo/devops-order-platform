@@ -1,19 +1,21 @@
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
 RUN useradd --create-home --uid 10001 appuser
 
-COPY app/ ./app/
+COPY requirements.txt ./requirements.txt
 
-RUN pip install --no-cache-dir \
-    fastapi \
-    "uvicorn[standard]"
+RUN python -m pip install --no-cache-dir \
+    -r requirements.txt
 
-USER 10001
+COPY --chown=10001:10001 app/ ./app/
+
+USER 10001:10001
 
 EXPOSE 8000
 
