@@ -1,0 +1,43 @@
+name: DevOps Order Platform CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-ci:
+    name: Test Backend and Build Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+
+      - name: Install development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.lock
+
+      - name: Check dependency consistency
+        run: python -m pip check
+
+      - name: Run backend tests
+        run: python -m pytest -v -p no:cacheprovider backend/tests/
+
+      - name: Build backend Docker image
+        run: |
+          docker build \
+            --tag devops-order-platform-backend:ci \
+            --file backend/Dockerfile \
+            backend
