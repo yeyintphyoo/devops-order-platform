@@ -32,8 +32,21 @@ jobs:
       - name: Check dependency consistency
         run: python -m pip check
 
-      - name: Run backend tests
-        run: python -m pytest -v -p no:cacheprovider backend/tests/
+      - name: Check code linting
+        run: ruff check backend/
+
+      - name: Check code formatting
+        run: ruff format --check backend/
+
+      - name: Run backend tests with coverage
+        run: |
+          python -m pytest \
+            -v \
+            -p no:cacheprovider \
+            --cov=backend/app \
+            --cov-report=term-missing \
+            --cov-fail-under=95 \
+            backend/tests/
 
       - name: Build backend Docker image
         run: |
