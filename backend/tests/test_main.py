@@ -1,6 +1,5 @@
 import pytest
 
-from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -109,35 +108,6 @@ def test_get_nonexistent_product():
     assert response.status_code == 404
     assert response.json() == {"detail": "Product not found"}
 
-def test_health_ready_when_database_fails():
-    with patch(
-        "backend.app.main.get_db",
-        side_effect=SQLAlchemyError("Simulated database failure"),
-    ):
-        response = client.get("/health/ready")
-
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Database is unavailable"
-    }
-
-def test_health_ready_when_database_fails():
-    def failing_get_db():
-        raise SQLAlchemyError("Simulated database failure")
-        yield  # Makes this function a generator dependency.
-
-    app.dependency_overrides[get_db] = failing_get_db
-
-    try:
-        response = client.get("/health/ready")
-    finally:
-        app.dependency_overrides[get_db] = override_get_db
-
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Database is unavailable"
-    }
-
 
 def test_health_ready_when_database_fails():
     class FailingSession:
@@ -158,9 +128,7 @@ def test_health_ready_when_database_fails():
         app.dependency_overrides[get_db] = override_get_db
 
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Database is unavailable"
-    }
+    assert response.json() == {"detail": "Database is unavailable"}
 
 
 def test_create_product():

@@ -90,9 +90,7 @@ def health_ready(db: Session = Depends(get_db)):
 @app.get("/products")
 def get_products(db: Session = Depends(get_db)):
     try:
-        products = db.scalars(
-            select(Product).order_by(Product.id)
-        ).all()
+        products = db.scalars(select(Product).order_by(Product.id)).all()
     except SQLAlchemyError:
         db.rollback()
         logger.exception("Failed to retrieve products")

@@ -80,6 +80,8 @@ python-dotenv==1.2.4
     #   uvicorn
 pyyaml==6.0.3
     # via uvicorn
+ruff==0.17.1
+    # via -r requirements-dev.txt
 sqlalchemy==2.0.48
     # via
     #   -r backend/requirements.txt
