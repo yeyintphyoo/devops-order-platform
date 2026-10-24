@@ -28,6 +28,11 @@ services:
       dockerfile: Dockerfile
     container_name: devops-order-api
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-orders_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orders_db}
     ports:
