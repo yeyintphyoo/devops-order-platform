@@ -66,6 +66,12 @@ pluggy==1.7.0
     # via
     #   pytest
     #   pytest-cov
+prometheus-client==0.26.0
+    # via
+    #   -r backend/requirements.txt
+    #   prometheus-fastapi-instrumentator
+prometheus-fastapi-instrumentator==8.1.0
+    # via -r backend/requirements.txt
 psycopg[binary]==3.2.9
     # via -r backend/requirements.txt
 psycopg-binary==3.2.9
@@ -95,7 +101,9 @@ sqlalchemy==2.0.48
     #   -r backend/requirements.txt
     #   alembic
 starlette==1.7.0
-    # via fastapi
+    # via
+    #   fastapi
+    #   prometheus-fastapi-instrumentator
 tomli==2.5.0
     # via
     #   alembic
