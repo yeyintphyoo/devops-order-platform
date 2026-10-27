@@ -238,6 +238,7 @@ def update_product_stock(
 
     return product
 
+
 # TEMPORARY: Remove after completing the Grafana 5xx alert test.
 @app.get("/_test/500", include_in_schema=False)
 def test_http_500():
