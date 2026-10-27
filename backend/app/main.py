@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .database import SessionLocal, get_db
 from .models import Product
 from .schemas import ProductCreate, ProductResponse, StockUpdate
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 logging.basicConfig(
@@ -64,6 +65,12 @@ app = FastAPI(
     description="A production-style DevOps learning project",
     version="0.2.0",
     lifespan=lifespan,
+)
+
+Instrumentator().instrument(app).expose(
+    app,
+    endpoint="/metrics",
+    include_in_schema=False,
 )
 
 
@@ -230,3 +237,8 @@ def update_product_stock(
     )
 
     return product
+
+# TEMPORARY: Remove after completing the Grafana 5xx alert test.
+@app.get("/_test/500", include_in_schema=False)
+def test_http_500():
+    raise RuntimeError("Intentional HTTP 500 for alert testing")

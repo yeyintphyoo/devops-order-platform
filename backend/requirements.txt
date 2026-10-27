@@ -2,3 +2,5 @@ fastapi==0.158.1
 uvicorn[standard]==0.54.0
 SQLAlchemy==2.0.48
 psycopg[binary]==3.2.9
+prometheus-fastapi-instrumentator==8.1.0
+prometheus-client==0.26.0

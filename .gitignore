@@ -1,16 +1,16 @@
-
-# Python
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 
 # Virtual environments
 .venv/
 venv/
 
 # Test and coverage artifacts
-.pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 
 # Environment variables and local secrets
@@ -18,24 +18,10 @@ htmlcov/
 .env.*
 !.env.example
 
-# Environment variables and secrets
-.env
-.env.*
-
-# Allow an explicitly named example environment file
-!.env.example
-
-# Python virtual environments and caches
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-
 # Local SQLite databases
 *.db
 *.sqlite
 *.sqlite3
 
-# Test and coverage artifacts
-.coverage
-htmlcov/
+# Local security scan reports
+reports/trivy/

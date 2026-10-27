@@ -74,6 +74,20 @@ def test_health_live():
     assert response.json() == {"status": "alive"}
 
 
+def test_prometheus_metrics_endpoint():
+    # Generate a request so the instrumentation records a metric.
+    health_response = client.get("/health/live")
+    assert health_response.status_code == 200
+
+    # Retrieve the Prometheus metrics.
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    assert "http_requests_total" in response.text
+    assert "http_request_duration_highr_seconds" in response.text
+
+
 def test_health_ready():
     response = client.get("/health/ready")
 

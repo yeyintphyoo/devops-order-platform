@@ -53,8 +53,56 @@ services:
       retries: 3
       start_period: 15s
 
+  prometheus:
+    image: prom/prometheus:v3.8.1
+    container_name: devops-order-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_storage:/prometheus
+    networks:
+      - order-platform
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test:
+        - CMD
+        - /bin/promtool
+        - check
+        - healthy
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    container_name: devops-order-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SMTP_ENABLED: "true"
+      GF_SMTP_HOST: "smtp.gmail.com:587"
+      GF_SMTP_USER: "mryeyintphyoo@gmail.com"
+      GF_SMTP_PASSWORD: "${GRAFANA_SMTP_PASSWORD}"
+      GF_SMTP_FROM_ADDRESS: "mryeyintphyoo@gmail.com"
+      GF_SMTP_FROM_NAME: "DevOps Order Platform Grafana"
+    volumes:
+      - grafana_storage:/var/lib/grafana
+    networks:
+      - order-platform
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
+  prometheus_storage:
+  grafana_storage:
 
 networks:
   order-platform:
