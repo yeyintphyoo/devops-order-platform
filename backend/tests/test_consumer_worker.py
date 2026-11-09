@@ -8,13 +8,15 @@ import pytest
 import signal
 
 from sqlalchemy.exc import OperationalError
-from backend.app.consumer_worker import main
 
 from backend.app.consumer_worker import (
     get_retry_count,
+    handle_message,
     handle_shutdown_signal,
-    handle_message,main,
+    main,
 )
+
+
 def make_event():
     """Create a valid order.created event."""
 
@@ -47,6 +49,7 @@ def make_message(retry_count=0):
 
     return channel, method, properties, body
 
+
 def database_failure():
     return OperationalError(
         "SELECT 1",
@@ -58,17 +61,16 @@ def database_failure():
 def test_consumer_ack_after_success():
     channel, method, properties, body = make_message()
 
-    with patch(
-        "backend.app.consumer_worker.SessionLocal"
-    ) as mock_session, patch(
-        "backend.app.consumer_worker.process_order_created_event",
-        return_value=True,
+    with (
+        patch("backend.app.consumer_worker.SessionLocal"),
+        patch(
+            "backend.app.consumer_worker.process_order_created_event",
+            return_value=True,
+        ),
     ):
         handle_message(channel, method, properties, body)
 
-    channel.basic_ack.assert_called_once_with(
-        delivery_tag=123
-    )
+    channel.basic_ack.assert_called_once_with(delivery_tag=123)
 
     channel.basic_nack.assert_not_called()
 
@@ -76,17 +78,16 @@ def test_consumer_ack_after_success():
 def test_consumer_ack_duplicate_event():
     channel, method, properties, body = make_message()
 
-    with patch(
-        "backend.app.consumer_worker.SessionLocal"
-    ), patch(
-        "backend.app.consumer_worker.process_order_created_event",
-        return_value=False,
+    with (
+        patch("backend.app.consumer_worker.SessionLocal"),
+        patch(
+            "backend.app.consumer_worker.process_order_created_event",
+            return_value=False,
+        ),
     ):
         handle_message(channel, method, properties, body)
 
-    channel.basic_ack.assert_called_once_with(
-        delivery_tag=123
-    )
+    channel.basic_ack.assert_called_once_with(delivery_tag=123)
 
 
 def test_consumer_reject_invalid_json():
@@ -108,19 +109,16 @@ def test_consumer_reject_invalid_json():
 
 
 def test_consumer_publish_retry_after_database_failure():
-    channel, method, properties, body = make_message(
-        retry_count=0
-    )
+    channel, method, properties, body = make_message(retry_count=0)
 
-    with patch(
-        "backend.app.consumer_worker.SessionLocal"
-    ), patch(
-        "backend.app.consumer_worker.process_order_created_event",
-        side_effect=database_failure(),
-    ), patch(
-        "backend.app.consumer_worker.publish_retry_event"
-    ) as mock_retry:
-
+    with (
+        patch("backend.app.consumer_worker.SessionLocal"),
+        patch(
+            "backend.app.consumer_worker.process_order_created_event",
+            side_effect=database_failure(),
+        ),
+        patch("backend.app.consumer_worker.publish_retry_event") as mock_retry,
+    ):
         handle_message(channel, method, properties, body)
 
     mock_retry.assert_called_once_with(
@@ -130,25 +128,20 @@ def test_consumer_publish_retry_after_database_failure():
         retry_count=1,
     )
 
-    channel.basic_ack.assert_called_once_with(
-        delivery_tag=123
-    )
+    channel.basic_ack.assert_called_once_with(delivery_tag=123)
 
 
 def test_consumer_reject_after_max_retries():
-    channel, method, properties, body = make_message(
-        retry_count=3
-    )
+    channel, method, properties, body = make_message(retry_count=3)
 
-    with patch(
-        "backend.app.consumer_worker.SessionLocal"
-    ), patch(
-        "backend.app.consumer_worker.process_order_created_event",
-        side_effect=database_failure(),
-    ), patch(
-        "backend.app.consumer_worker.publish_retry_event"
-    ) as mock_retry:
-
+    with (
+        patch("backend.app.consumer_worker.SessionLocal"),
+        patch(
+            "backend.app.consumer_worker.process_order_created_event",
+            side_effect=database_failure(),
+        ),
+        patch("backend.app.consumer_worker.publish_retry_event") as mock_retry,
+    ):
         handle_message(channel, method, properties, body)
 
     mock_retry.assert_not_called()
@@ -164,16 +157,17 @@ def test_consumer_reject_after_max_retries():
 def test_consumer_does_not_ack_when_retry_publish_fails():
     channel, method, properties, body = make_message()
 
-    with patch(
-        "backend.app.consumer_worker.SessionLocal"
-    ), patch(
-        "backend.app.consumer_worker.process_order_created_event",
-        side_effect=database_failure(),
-    ), patch(
-        "backend.app.consumer_worker.publish_retry_event",
-        side_effect=RuntimeError("RabbitMQ unavailable"),
+    with (
+        patch("backend.app.consumer_worker.SessionLocal"),
+        patch(
+            "backend.app.consumer_worker.process_order_created_event",
+            side_effect=database_failure(),
+        ),
+        patch(
+            "backend.app.consumer_worker.publish_retry_event",
+            side_effect=RuntimeError("RabbitMQ unavailable"),
+        ),
     ):
-
         with pytest.raises(RuntimeError):
             handle_message(
                 channel,
@@ -190,14 +184,12 @@ def test_consumer_does_not_ack_when_retry_publish_fails():
     "invalid_count",
     [-1, "abc", None, 1.5, True],
 )
-
 def test_invalid_retry_count(invalid_count):
-    properties = pika.BasicProperties(
-        headers={"x-retry-count": invalid_count}
-    )
+    properties = pika.BasicProperties(headers={"x-retry-count": invalid_count})
 
     with pytest.raises(ValueError):
         get_retry_count(properties)
+
 
 def test_consumer_closes_connection_after_failure():
     connection = Mock()
@@ -206,14 +198,15 @@ def test_consumer_closes_connection_after_failure():
     channel = connection.channel.return_value
 
     connection.process_data_events.side_effect = RuntimeError(
-    "Consumer processing failed"
+        "Consumer processing failed"
     )
 
-    with patch(
-        "backend.app.consumer_worker._connection_parameters"
-    ), patch(
-        "backend.app.consumer_worker.pika.BlockingConnection",
-        return_value=connection,
+    with (
+        patch("backend.app.consumer_worker._connection_parameters"),
+        patch(
+            "backend.app.consumer_worker.pika.BlockingConnection",
+            return_value=connection,
+        ),
     ):
         with pytest.raises(
             RuntimeError,
@@ -222,13 +215,12 @@ def test_consumer_closes_connection_after_failure():
             main()
 
     channel.confirm_delivery.assert_called_once()
-    channel.basic_qos.assert_called_once_with(
-        prefetch_count=1
-    )
+    channel.basic_qos.assert_called_once_with(prefetch_count=1)
 
     channel.basic_consume.assert_called_once()
 
     connection.close.assert_called_once()
+
 
 def test_consumer_handles_keyboard_interrupt():
     connection = Mock()
@@ -239,25 +231,22 @@ def test_consumer_handles_keyboard_interrupt():
     # Simulate Ctrl+C during AMQP event processing.
     connection.process_data_events.side_effect = KeyboardInterrupt()
 
-    with patch(
-        "backend.app.consumer_worker._connection_parameters"
-    ), patch(
-        "backend.app.consumer_worker.pika.BlockingConnection",
-        return_value=connection,
+    with (
+        patch("backend.app.consumer_worker._connection_parameters"),
+        patch(
+            "backend.app.consumer_worker.pika.BlockingConnection",
+            return_value=connection,
+        ),
     ):
         main()
 
     channel.confirm_delivery.assert_called_once()
 
-    channel.basic_qos.assert_called_once_with(
-        prefetch_count=1
-    )
+    channel.basic_qos.assert_called_once_with(prefetch_count=1)
 
     channel.basic_consume.assert_called_once()
 
-    connection.process_data_events.assert_called_once_with(
-        time_limit=1
-    )
+    connection.process_data_events.assert_called_once_with(time_limit=1)
 
     connection.close.assert_called_once()
 
@@ -267,15 +256,14 @@ def test_consumer_does_not_close_already_closed_connection():
     connection.is_open = False
 
     # Simulate a failure during AMQP event processing.
-    connection.process_data_events.side_effect = RuntimeError(
-        "Connection lost"
-    )
+    connection.process_data_events.side_effect = RuntimeError("Connection lost")
 
-    with patch(
-        "backend.app.consumer_worker._connection_parameters"
-    ), patch(
-        "backend.app.consumer_worker.pika.BlockingConnection",
-        return_value=connection,
+    with (
+        patch("backend.app.consumer_worker._connection_parameters"),
+        patch(
+            "backend.app.consumer_worker.pika.BlockingConnection",
+            return_value=connection,
+        ),
     ):
         with pytest.raises(
             RuntimeError,
@@ -283,11 +271,10 @@ def test_consumer_does_not_close_already_closed_connection():
         ):
             main()
 
-    connection.process_data_events.assert_called_once_with(
-        time_limit=1
-    )
+    connection.process_data_events.assert_called_once_with(time_limit=1)
 
     connection.close.assert_not_called()
+
 
 def test_consumer_handles_sigterm():
     connection = Mock()
@@ -301,18 +288,17 @@ def test_consumer_handles_sigterm():
 
     connection.process_data_events.side_effect = simulate_sigterm
 
-    with patch(
-        "backend.app.consumer_worker._connection_parameters"
-    ), patch(
-        "backend.app.consumer_worker.pika.BlockingConnection",
-        return_value=connection,
+    with (
+        patch("backend.app.consumer_worker._connection_parameters"),
+        patch(
+            "backend.app.consumer_worker.pika.BlockingConnection",
+            return_value=connection,
+        ),
     ):
         main()
 
     channel.basic_consume.assert_called_once()
 
-    connection.process_data_events.assert_called_once_with(
-        time_limit=1
-    )
+    connection.process_data_events.assert_called_once_with(time_limit=1)
 
     connection.close.assert_called_once()

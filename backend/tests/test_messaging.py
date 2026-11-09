@@ -1,5 +1,6 @@
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
 
 import pika
 import pytest
@@ -11,6 +12,10 @@ from backend.app.messaging import (
     ORDER_EVENTS_ROUTING_KEY,
     _connection_parameters,
     publish_order_event,
+    ORDER_EVENTS_RETRY_EXCHANGE,
+    ORDER_EVENTS_RETRY_ROUTING_KEY,
+    RETRY_COUNT_HEADER,
+    publish_retry_event,
 )
 
 
@@ -122,19 +127,6 @@ def test_publish_order_event_closes_connection_after_publish_error(
             publish_order_event({"event_type": "order.created"})
 
     mock_connection.close.assert_called_once_with()
-
-from unittest.mock import Mock
-
-import pika
-import pytest
-
-from backend.app.messaging import (
-    MessagingError,
-    publish_retry_event,
-    ORDER_EVENTS_RETRY_EXCHANGE,
-    ORDER_EVENTS_RETRY_ROUTING_KEY,
-    RETRY_COUNT_HEADER,
-)
 
 
 def test_publish_retry_event_success():

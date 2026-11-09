@@ -32,19 +32,18 @@ logger = logging.getLogger(__name__)
 # Shared shutdown flag for graceful termination
 shutdown_requested = threading.Event()
 
+
 def get_retry_count(properties) -> int:
     """Read and validate the retry count from message headers."""
 
     headers = properties.headers or {}
     retry_count = headers.get(RETRY_COUNT_HEADER, 0)
 
-    if (
-        type(retry_count) is not int
-        or retry_count < 0
-    ):
+    if type(retry_count) is not int or retry_count < 0:
         raise ValueError("Invalid retry count header")
 
     return retry_count
+
 
 def handle_message(channel, method, properties, body):
     """Process one message with idempotency and bounded retries."""
@@ -64,9 +63,7 @@ def handle_message(channel, method, properties, body):
         ValueError,
         TypeError,
     ):
-        logger.exception(
-            "Invalid order event. Rejecting to DLQ."
-        )
+        logger.exception("Invalid order event. Rejecting to DLQ.")
 
         channel.basic_nack(
             delivery_tag=delivery_tag,
@@ -150,9 +147,11 @@ def handle_message(channel, method, properties, body):
             event.event_id,
         )
 
+
 def handle_shutdown_signal(signum, frame):
     """Request graceful consumer shutdown."""
     shutdown_requested.set()
+
 
 def main():
     """Start the RabbitMQ consumer."""
@@ -160,13 +159,11 @@ def main():
     connection = None
     shutdown_requested.clear()
     previous_sigterm_handler = signal.signal(
-       signal.SIGTERM,
-       handle_shutdown_signal,
+        signal.SIGTERM,
+        handle_shutdown_signal,
     )
     try:
-        connection = pika.BlockingConnection(
-            _connection_parameters()
-        )
+        connection = pika.BlockingConnection(_connection_parameters())
 
         channel = connection.channel()
 
@@ -189,19 +186,17 @@ def main():
         )
 
         while not shutdown_requested.is_set():
-           connection.process_data_events(time_limit=1)
+            connection.process_data_events(time_limit=1)
     except KeyboardInterrupt:
-        logger.info(
-            "Consumer interrupted. Shutting down gracefully."
-        )
+        logger.info("Consumer interrupted. Shutting down gracefully.")
 
     finally:
-       signal.signal(
-          signal.SIGTERM,
-          previous_sigterm_handler,
+        signal.signal(
+            signal.SIGTERM,
+            previous_sigterm_handler,
         )
 
-       if connection is not None and connection.is_open:
+        if connection is not None and connection.is_open:
             connection.close()
             logger.info("RabbitMQ connection closed.")
 

@@ -31,9 +31,7 @@ engine = create_engine(
     pool_pre_ping=True,
     pool_size=1,
     max_overflow=0,
-    connect_args={
-        "options": "-c default_transaction_read_only=on"
-    },
+    connect_args={"options": "-c default_transaction_read_only=on"},
 )
 
 
@@ -46,8 +44,7 @@ METRIC_NAMES = {
     "expired_leases": "order_platform_outbox_expired_leases",
     "retry_due_events": "order_platform_outbox_retry_due_events",
     "max_retry_count": "order_platform_outbox_max_retry_count",
-    "oldest_pending_age_seconds":
-        "order_platform_outbox_oldest_pending_age_seconds",
+    "oldest_pending_age_seconds": "order_platform_outbox_oldest_pending_age_seconds",
 }
 
 

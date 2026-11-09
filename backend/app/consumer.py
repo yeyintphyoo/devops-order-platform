@@ -19,9 +19,7 @@ def process_order_created_event(
     """
 
     existing_event = db.scalar(
-        select(ProcessedEvent).where(
-            ProcessedEvent.event_id == str(event.event_id)
-        )
+        select(ProcessedEvent).where(ProcessedEvent.event_id == str(event.event_id))
     )
 
     if existing_event:
@@ -44,9 +42,7 @@ def process_order_created_event(
         # Another consumer may have inserted the same event
         # concurrently. The unique constraint protects against duplicates.
         existing_event = db.scalar(
-            select(ProcessedEvent).where(
-                ProcessedEvent.event_id == str(event.event_id)
-            )
+            select(ProcessedEvent).where(ProcessedEvent.event_id == str(event.event_id))
         )
 
         if existing_event:

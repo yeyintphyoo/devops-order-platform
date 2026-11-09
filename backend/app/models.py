@@ -30,6 +30,7 @@ class Product(Base):
         server_default="0",
     )
 
+
 class Order(Base):
     __tablename__ = "orders"
 
@@ -150,6 +151,7 @@ class OutboxEvent(Base):
             "created_at",
         ),
     )
+
 
 class ProcessedEvent(Base):
     __tablename__ = "processed_events"

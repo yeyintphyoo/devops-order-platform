@@ -60,6 +60,7 @@ class OrderResponse(BaseModel):
     status: str
     created_at: datetime
 
+
 class OrderCreatedEvent(BaseModel):
     event_id: UUID
     event_type: str = Field(pattern="^order\\.created$")

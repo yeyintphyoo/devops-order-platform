@@ -57,6 +57,7 @@ def _connection_parameters() -> pika.ConnectionParameters:
         heartbeat=60,
     )
 
+
 def publish_order_event(
     event: dict[str, Any],
     routing_key: str = ORDER_EVENTS_ROUTING_KEY,
@@ -132,6 +133,7 @@ def publish_order_event(
                     exc_info=True,
                 )
 
+
 def publish_retry_event(
     channel,
     body: bytes,
@@ -161,9 +163,7 @@ def publish_retry_event(
     )
 
     if confirmed is False:
-        raise MessagingError(
-            "RabbitMQ did not confirm retry publication"
-        )
+        raise MessagingError("RabbitMQ did not confirm retry publication")
 
     logger.info(
         "Retry event published message_id=%s retry_count=%s",
