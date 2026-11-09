@@ -25,3 +25,16 @@ htmlcov/
 
 # Local security scan reports
 reports/trivy/
+
+# Local monitoring credentials
+.env.outbox-exporter
+
+# Local Compose backups
+compose.yaml.bak.*
+
+# Prometheus local configuration backups
+prometheus/prometheus.yml.bak*
+
+# Prometheus alert and test configuration backups
+prometheus/alerts/*.bak*
+prometheus/tests/*.bak*

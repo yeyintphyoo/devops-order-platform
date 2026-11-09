@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.database import Base, get_db
 from backend.app.main import app
-from backend.app.models import Product
+from backend.app.models import Order, OutboxEvent, Product
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 
@@ -118,6 +118,157 @@ def test_get_existing_product():
         "price": 2500.0,
         "stock_quantity": 0,
     }
+
+
+def test_get_products_returns_cached_products(monkeypatch):
+    cached_products = [
+        {
+            "id": 1,
+            "name": "Cached Laptop",
+            "price": 2500.0,
+            "stock_quantity": 5,
+        }
+    ]
+
+    def fake_get_cached_products():
+        return cached_products
+
+    def fail_if_database_is_queried(*args, **kwargs):
+        pytest.fail("Database should not be queried on a cache hit")
+
+    monkeypatch.setattr(main, "get_cached_products", fake_get_cached_products)
+    monkeypatch.setattr(main, "cache_products", lambda products: None)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            main,
+            "get_db",
+            fail_if_database_is_queried,
+        )
+
+        response = client.get("/products")
+
+    assert response.status_code == 200
+    assert response.json() == cached_products
+
+
+def test_get_products_populates_cache_on_cache_miss(monkeypatch):
+    cached_values = []
+
+    monkeypatch.setattr(main, "get_cached_products", lambda: None)
+    monkeypatch.setattr(
+        main,
+        "cache_products",
+        lambda products: cached_values.append(products),
+    )
+
+    response = client.get("/products")
+
+    assert response.status_code == 200
+    assert len(cached_values) == 1
+    assert cached_values[0] == response.json()
+
+
+def test_get_products_falls_back_when_redis_read_fails(monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    from backend.app import cache
+
+    def fail_to_read_cache():
+        raise RedisConnectionError("Redis unavailable")
+
+    monkeypatch.setattr(cache.redis_client, "get", lambda key: fail_to_read_cache())
+
+    response = client.get("/products")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+    assert response.json()[0]["name"] == "Laptop"
+
+
+def test_get_products_succeeds_when_redis_write_fails(monkeypatch):
+    from backend.app import cache
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    monkeypatch.setattr(main, "get_cached_products", lambda: None)
+
+    def fail_to_write_cache(*args, **kwargs):
+        raise RedisConnectionError("Redis unavailable")
+
+    monkeypatch.setattr(cache.redis_client, "setex", fail_to_write_cache)
+
+    response = client.get("/products")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+    assert response.json()[0]["name"] == "Laptop"
+
+
+def test_create_product_invalidates_cache(monkeypatch):
+    invalidation_calls = []
+
+    monkeypatch.setattr(
+        main,
+        "invalidate_products_cache",
+        lambda: invalidation_calls.append(True),
+    )
+
+    response = client.post(
+        "/products",
+        json={
+            "name": "Monitor",
+            "price": 350.0,
+            "stock_quantity": 10,
+        },
+    )
+
+    assert response.status_code == 201
+    assert invalidation_calls == [True]
+
+
+def test_update_product_stock_invalidates_cache(monkeypatch):
+    invalidation_calls = []
+
+    monkeypatch.setattr(
+        main,
+        "invalidate_products_cache",
+        lambda: invalidation_calls.append(True),
+    )
+
+    response = client.patch(
+        "/products/3/stock",
+        json={"stock_quantity": 25},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["stock_quantity"] == 25
+    assert invalidation_calls == [True]
+
+
+def test_create_product_succeeds_when_redis_invalidation_fails(monkeypatch):
+    from backend.app import cache
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    def fail_to_delete_cache(*args, **kwargs):
+        raise RedisConnectionError("Redis unavailable")
+
+    monkeypatch.setattr(
+        cache.redis_client,
+        "delete",
+        fail_to_delete_cache,
+    )
+
+    response = client.post(
+        "/products",
+        json={
+            "name": "Webcam",
+            "price": 80.0,
+            "stock_quantity": 5,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["name"] == "Webcam"
 
 
 def test_get_nonexistent_product():
@@ -609,3 +760,143 @@ def test_get_db_closes_session_after_exception(monkeypatch):
         db_generator.throw(RuntimeError("Simulated request failure"))
 
     assert fake_session.closed is True
+
+
+def test_create_order_success(monkeypatch):
+    monkeypatch.setattr(main, "invalidate_products_cache", lambda: None)
+
+    with TestingSessionLocal() as db:
+        product = db.get(Product, 3)
+        product.stock_quantity = 10
+        db.commit()
+
+    response = client.post(
+        "/orders",
+        json={"product_id": 3, "quantity": 2},
+    )
+
+    assert response.status_code == 201
+
+    order_data = response.json()
+
+    assert order_data["product_id"] == 3
+    assert order_data["quantity"] == 2
+    assert order_data["unit_price"] == "75.00"
+    assert order_data["total_price"] == "150.00"
+    assert order_data["status"] == "pending"
+
+    with TestingSessionLocal() as db:
+        product = db.get(Product, 3)
+        order = db.get(Order, order_data["id"])
+        outbox_events = db.query(OutboxEvent).all()
+
+        assert product.stock_quantity == 8
+        assert order is not None
+        assert len(outbox_events) == 1
+
+        event = outbox_events[0]
+
+        assert event.aggregate_type == "order"
+        assert event.aggregate_id == order.id
+        assert event.event_type == "order.created"
+        assert event.payload["order_id"] == order.id
+        assert event.payload["quantity"] == 2
+
+
+def test_create_order_for_nonexistent_product(monkeypatch):
+    response = client.post(
+        "/orders",
+        json={"product_id": 999, "quantity": 1},
+    )
+
+    assert response.status_code == 404
+
+    with TestingSessionLocal() as db:
+        assert db.query(Order).count() == 0
+        assert db.query(OutboxEvent).count() == 0
+
+
+def test_create_order_with_insufficient_stock(monkeypatch):
+    response = client.post(
+        "/orders",
+        json={"product_id": 3, "quantity": 1},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Insufficient stock"
+
+    with TestingSessionLocal() as db:
+        product = db.get(Product, 3)
+
+        assert product.stock_quantity == 0
+        assert db.query(Order).count() == 0
+        assert db.query(OutboxEvent).count() == 0
+
+
+@pytest.mark.parametrize(
+    "order_data",
+    [
+        {"product_id": 0, "quantity": 1},
+        {"product_id": 3, "quantity": 0},
+        {"product_id": 3, "quantity": -1},
+    ],
+)
+def test_create_order_rejects_invalid_input(order_data):
+    response = client.post("/orders", json=order_data)
+
+    assert response.status_code == 422
+
+
+def test_create_order_rolls_back_when_outbox_insert_fails(monkeypatch):
+    monkeypatch.setattr(main, "invalidate_products_cache", lambda: None)
+
+    with TestingSessionLocal() as db:
+        product = db.get(Product, 3)
+        product.stock_quantity = 10
+        db.commit()
+
+    original_add = TestingSessionLocal
+
+    class FailingOutboxSession:
+        def __init__(self):
+            self.db = original_add()
+
+        def __getattr__(self, name):
+            return getattr(self.db, name)
+
+        def add(self, instance):
+            if isinstance(instance, OutboxEvent):
+                raise SQLAlchemyError("Simulated outbox insertion failure")
+
+            self.db.add(instance)
+
+        def close(self):
+            self.db.close()
+
+    monkeypatch.setattr(main, "get_db", lambda: None)
+
+    def override_failing_db():
+        db = FailingOutboxSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_failing_db
+
+    try:
+        response = client.post(
+            "/orders",
+            json={"product_id": 3, "quantity": 2},
+        )
+    finally:
+        app.dependency_overrides[get_db] = override_get_db
+
+    assert response.status_code == 503
+
+    with TestingSessionLocal() as db:
+        product = db.get(Product, 3)
+
+        assert product.stock_quantity == 10
+        assert db.query(Order).count() == 0
+        assert db.query(OutboxEvent).count() == 0

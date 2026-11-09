@@ -1,0 +1,59 @@
+groups:
+  - name: order-platform-outbox
+    interval: 15s
+    rules:
+
+      # Alert 1: Unpublished events are aging
+      - alert: OutboxBacklogAging
+        expr: order_platform_outbox_oldest_pending_age_seconds > 120
+        for: 2m
+        labels:
+          severity: warning
+          service: outbox
+        annotations:
+          summary: "Transactional outbox backlog is aging"
+          description: "The oldest unpublished event has exceeded 120 seconds."
+
+      # Alert 2: Publisher leases have expired
+      - alert: OutboxExpiredLeases
+        expr: order_platform_outbox_expired_leases > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: outbox
+        annotations:
+          summary: "Expired transactional outbox leases detected"
+          description: "One or more unpublished outbox events have expired publisher leases."
+
+      # Alert 3: Exporter cannot query PostgreSQL
+      - alert: OutboxExporterDatabaseDown
+        expr: order_platform_outbox_exporter_db_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: outbox
+        annotations:
+          summary: "Outbox exporter PostgreSQL query failed"
+          description: "The outbox exporter cannot successfully query PostgreSQL."
+
+      # Alert 4: Prometheus cannot scrape exporter
+      - alert: OutboxExporterDown
+        expr: up{job="order-platform-outbox"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: outbox
+        annotations:
+          summary: "Outbox metrics exporter unavailable"
+          description: "Prometheus cannot scrape the outbox exporter."
+
+      # Alert 5: Exporter metrics are stale
+      - alert: OutboxMetricsStale
+        expr: time() - order_platform_outbox_exporter_last_success_timestamp_seconds > 60
+        for: 1m
+        labels:
+          severity: warning
+          service: outbox
+        annotations:
+          summary: "Transactional outbox metrics are stale"
+          description: "The exporter has not successfully refreshed its PostgreSQL metrics for more than 60 seconds."

@@ -1,16 +1,28 @@
 import logging
 from contextlib import asynccontextmanager
+from decimal import Decimal
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, status
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from .cache import (
+    cache_products,
+    get_cached_products,
+    invalidate_products_cache,
+)
 from .database import SessionLocal, get_db
-from .models import Product
-from .schemas import ProductCreate, ProductResponse, StockUpdate
-from prometheus_fastapi_instrumentator import Instrumentator
-
+from .models import Order, OutboxEvent, Product
+from .schemas import (
+    OrderCreate,
+    OrderResponse,
+    ProductCreate,
+    ProductResponse,
+    StockUpdate,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,6 +108,13 @@ def health_ready(db: Session = Depends(get_db)):
 
 @app.get("/products")
 def get_products(db: Session = Depends(get_db)):
+    # Try Redis first; None means cache miss or Redis failure.
+    cached_products = get_cached_products()
+    if cached_products is not None:
+        logger.debug("Returning products from Redis cache")
+        return cached_products
+
+    # Fall back to PostgreSQL on a cache miss or Redis failure.
     try:
         products = db.scalars(select(Product).order_by(Product.id)).all()
     except SQLAlchemyError:
@@ -106,7 +125,7 @@ def get_products(db: Session = Depends(get_db)):
             detail="Database operation failed",
         )
 
-    return [
+    product_list = [
         {
             "id": product.id,
             "name": product.name,
@@ -115,6 +134,11 @@ def get_products(db: Session = Depends(get_db)):
         }
         for product in products
     ]
+
+    # A cache failure must not prevent a successful database response.
+    cache_products(product_list)
+
+    return product_list
 
 
 @app.get("/products/{product_id}", response_model=ProductResponse)
@@ -190,6 +214,8 @@ def create_product(
 
     logger.info("Product created successfully id=%s", product.id)
 
+    invalidate_products_cache()
+
     return product
 
 
@@ -236,7 +262,124 @@ def update_product_stock(
         product.stock_quantity,
     )
 
+    invalidate_products_cache()
+
     return product
+
+
+@app.post(
+    "/orders",
+    response_model=OrderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_order(
+    order_data: OrderCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        # Lock the product row to prevent concurrent orders
+        # from overselling the available stock.
+        product = db.scalar(
+            select(Product).where(Product.id == order_data.product_id).with_for_update()
+        )
+
+        if product is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found",
+            )
+
+        # Verify available stock.
+        if product.stock_quantity < order_data.quantity:
+            raise HTTPException(
+                status_code=409,
+                detail="Insufficient stock",
+            )
+
+        # Calculate prices using the database product price.
+        unit_price = Decimal(str(product.price)).quantize(Decimal("0.01"))
+        total_price = (unit_price * order_data.quantity).quantize(Decimal("0.01"))
+
+        # Deduct stock.
+        product.stock_quantity -= order_data.quantity
+
+        # Create the order.
+        order = Order(
+            product_id=product.id,
+            quantity=order_data.quantity,
+            unit_price=unit_price,
+            total_price=total_price,
+            status="pending",
+        )
+
+        db.add(order)
+        db.flush()
+
+        # Load the database-generated order ID and timestamp.
+        db.refresh(order)
+
+        # Prepare the order-created event.
+        event_id = str(uuid4())
+
+        event_payload = {
+            "event_id": event_id,
+            "event_type": "order.created",
+            "order_id": order.id,
+            "product_id": product.id,
+            "product_name": product.name,
+            "quantity": order.quantity,
+            "unit_price": str(unit_price),
+            "total_price": str(total_price),
+            "status": order.status,
+            "created_at": order.created_at.isoformat(),
+        }
+
+        # Store the event in the outbox.
+        outbox_event = OutboxEvent(
+            event_id=event_id,
+            aggregate_type="order",
+            aggregate_id=order.id,
+            event_type="order.created",
+            payload=event_payload,
+        )
+
+        db.add(outbox_event)
+
+        # Commit stock deduction, order, and outbox event together.
+        db.commit()
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except IntegrityError:
+        db.rollback()
+        logger.exception("Order creation failed due to a data conflict")
+        raise HTTPException(
+            status_code=409,
+            detail="Could not create order due to a data conflict",
+        )
+
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Database error while creating an order")
+        raise HTTPException(
+            status_code=503,
+            detail="Database operation failed",
+        )
+
+    logger.info(
+        "Order created id=%s product_id=%s quantity=%s event_id=%s",
+        order.id,
+        order.product_id,
+        order.quantity,
+        event_id,
+    )
+
+    # Stock has changed, so invalidate the product cache.
+    invalidate_products_cache()
+
+    return order
 
 
 # TEMPORARY: Remove after completing the Grafana 5xx alert test.

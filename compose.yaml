@@ -22,10 +22,61 @@ services:
       retries: 10
       start_period: 10s
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: devops-order-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - "60"
+      - "1"
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis_storage:/data
+    networks:
+      - order-platform
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: devops-order-rabbitmq
+    restart: unless-stopped
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+    volumes:
+      - rabbitmq_storage:/var/lib/rabbitmq
+    networks:
+      - order-platform
+    ports:
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: devops-order-platform-backend
     container_name: devops-order-api
     restart: unless-stopped
     read_only: true
@@ -35,12 +86,20 @@ services:
       - no-new-privileges:true
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-orders_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orders_db}
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      RABBITMQ_VHOST: /
     ports:
       - "8000:8000"
     networks:
       - order-platform
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test:
@@ -53,6 +112,71 @@ services:
       retries: 3
       start_period: 15s
 
+  publisher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: devops-order-platform-backend
+    container_name: devops-order-publisher
+    command: ["python", "-m", "app.publisher"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-orders_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orders_db}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      RABBITMQ_VHOST: /
+      OUTBOX_POLL_INTERVAL_SECONDS: "5"
+      OUTBOX_BATCH_SIZE: "5"
+      OUTBOX_LOCK_SECONDS: "120"
+      OUTBOX_MAX_RETRY_SECONDS: "300"
+    networks:
+      - order-platform
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  consumer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: devops-order-platform-backend
+    container_name: devops-order-consumer
+    command:
+      - python
+      - -m
+      - app.consumer_worker
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-orders_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-orders_db}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER:?Set RABBITMQ_DEFAULT_USER in .env}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:?Set RABBITMQ_DEFAULT_PASS in .env}
+      RABBITMQ_VHOST: /
+
+    networks:
+      - order-platform
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   prometheus:
     image: prom/prometheus:v3.8.1
     container_name: devops-order-prometheus
@@ -61,6 +185,7 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus_storage:/prometheus
     networks:
       - order-platform
@@ -99,10 +224,38 @@ services:
     depends_on:
       - prometheus
 
+  outbox-exporter:
+    image: devops-order-platform-outbox-exporter:lab
+    container_name: devops-order-outbox-exporter
+
+    command:
+      - python
+      - -m
+      - app.outbox_exporter
+
+    env_file:
+      - path: ./.env.outbox-exporter
+        required: true
+
+    environment:
+      OUTBOX_EXPORTER_PORT: "9108"
+      OUTBOX_EXPORTER_POLL_INTERVAL: "15"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - order-platform
+
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   prometheus_storage:
   grafana_storage:
+  redis_storage:
+  rabbitmq_storage:
 
 networks:
   order-platform:

@@ -1,0 +1,114 @@
+rule_files:
+  - ../alerts/outbox-alerts.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: "Outbox backlog aging alert"
+
+    interval: 15s
+
+    input_series:
+      - series: 'order_platform_outbox_oldest_pending_age_seconds{job="order-platform-outbox",instance="outbox-exporter:9108"}'
+        values: '0 0 121+0x12'
+
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OutboxBacklogAging
+        exp_alerts: []
+
+      - eval_time: 3m
+        alertname: OutboxBacklogAging
+        exp_alerts:
+          - exp_labels:
+              job: order-platform-outbox
+              instance: outbox-exporter:9108
+              severity: warning
+              service: outbox
+            exp_annotations:
+              summary: "Transactional outbox backlog is aging"
+              description: "The oldest unpublished event has exceeded 120 seconds."
+
+  - name: "Expired publisher leases alert"
+    interval: 15s
+    input_series:
+      - series: 'order_platform_outbox_expired_leases{job="order-platform-outbox",instance="outbox-exporter:9108"}'
+        values: '0 0 1+0x12'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OutboxExpiredLeases
+        exp_alerts: []
+      - eval_time: 2m30s
+        alertname: OutboxExpiredLeases
+        exp_alerts:
+          - exp_labels:
+              job: order-platform-outbox
+              instance: outbox-exporter:9108
+              severity: warning
+              service: outbox
+            exp_annotations:
+              summary: "Expired transactional outbox leases detected"
+              description: "One or more unpublished outbox events have expired publisher leases."
+
+  - name: "Exporter database failure alert"
+    interval: 15s
+    input_series:
+      - series: 'order_platform_outbox_exporter_db_up{job="order-platform-outbox",instance="outbox-exporter:9108"}'
+        values: '1 1 0+0x12'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OutboxExporterDatabaseDown
+        exp_alerts: []
+      - eval_time: 1m30s
+        alertname: OutboxExporterDatabaseDown
+        exp_alerts:
+          - exp_labels:
+              job: order-platform-outbox
+              instance: outbox-exporter:9108
+              severity: critical
+              service: outbox
+            exp_annotations:
+              summary: "Outbox exporter PostgreSQL query failed"
+              description: "The outbox exporter cannot successfully query PostgreSQL."
+
+  - name: "Exporter scrape failure alert"
+    interval: 15s
+    input_series:
+      - series: 'up{job="order-platform-outbox",instance="outbox-exporter:9108"}'
+        values: '1 1 0+0x12'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OutboxExporterDown
+        exp_alerts: []
+      - eval_time: 1m30s
+        alertname: OutboxExporterDown
+        exp_alerts:
+          - exp_labels:
+              job: order-platform-outbox
+              instance: outbox-exporter:9108
+              severity: critical
+              service: outbox
+            exp_annotations:
+              summary: "Outbox metrics exporter unavailable"
+              description: "Prometheus cannot scrape the outbox exporter."
+
+  - name: "Stale outbox metrics alert"
+    interval: 15s
+    input_series:
+      - series: 'order_platform_outbox_exporter_last_success_timestamp_seconds{job="order-platform-outbox",instance="outbox-exporter:9108"}'
+        values: '0+0x16'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: OutboxMetricsStale
+        exp_alerts: []
+      - eval_time: 2m30s
+        alertname: OutboxMetricsStale
+        exp_alerts:
+          - exp_labels:
+              job: order-platform-outbox
+              instance: outbox-exporter:9108
+              severity: warning
+              service: outbox
+            exp_annotations:
+              summary: "Transactional outbox metrics are stale"
+              description: "The exporter has not successfully refreshed its PostgreSQL metrics for more than 60 seconds."
