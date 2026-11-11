@@ -76,6 +76,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -101,6 +102,7 @@ jobs:
             type=raw,value=main
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -108,3 +110,36 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Display published image digest
+        run: |
+          echo "Published image digest: ${{ steps.build.outputs.digest }}"
+
+      - name: Scan published GHCR image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          scan-type: image
+          scanners: vuln
+          severity: CRITICAL
+          exit-code: '1'
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.0.0
+
+      - name: Sign published image with Cosign
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "${IMAGE_REF}"
+
+      - name: Verify published image signature
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          CERT_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yaml@${{ github.ref }}
+          OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          cosign verify \
+            --certificate-identity "${CERT_IDENTITY}" \
+            --certificate-oidc-issuer "${OIDC_ISSUER}" \
+            "${IMAGE_REF}"
