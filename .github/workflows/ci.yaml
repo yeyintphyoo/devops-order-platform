@@ -143,3 +143,69 @@ jobs:
             --certificate-identity "${CERT_IDENTITY}" \
             --certificate-oidc-issuer "${OIDC_ISSUER}" \
             "${IMAGE_REF}"
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate CycloneDX SBOM
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p security-reports
+
+          syft "${IMAGE_REF}" \
+            --output cyclonedx-json=security-reports/backend-sbom.cdx.json
+
+          test -s security-reports/backend-sbom.cdx.json
+
+      - name: Upload CycloneDX SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-cyclonedx-sbom
+          path: security-reports/backend-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attest CycloneDX SBOM with Cosign
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          cosign attest \
+            --yes \
+            --type cyclonedx \
+            --predicate security-reports/backend-sbom.cdx.json \
+            "${IMAGE_REF}"
+
+      - name: Verify CycloneDX SBOM attestation
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          CERT_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yaml@${{ github.ref }}
+          OIDC_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          cosign verify-attestation \
+            --type cyclonedx \
+            --certificate-identity "${CERT_IDENTITY}" \
+            --certificate-oidc-issuer "${OIDC_ISSUER}" \
+            "${IMAGE_REF}"
+
+      - name: Generate Trivy vulnerability report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+          scan-type: image
+          scanners: vuln
+          format: json
+          output: security-reports/backend-trivy-report.json
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          exit-code: '0'
+
+      - name: Prepare security report directory
+        run: mkdir -p security-reports
+
+      - name: Upload Trivy vulnerability report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-trivy-vulnerability-report
+          path: security-reports/backend-trivy-report.json
+          if-no-files-found: error
+          retention-days: 30
